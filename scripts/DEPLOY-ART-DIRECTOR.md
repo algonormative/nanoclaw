@@ -7,7 +7,7 @@ Steps to enable plotter art generation from NanoClaw on the Mac Mini.
 ```bash
 ssh lemon-chan
 cd ~/git
-git clone git@github.com:chronick/hatch3d.git
+git clone git@github.com:algonormative/hatch3d.git
 cd hatch3d
 npm install
 ```
