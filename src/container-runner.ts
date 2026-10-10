@@ -29,6 +29,11 @@ import {
 import { OneCLI } from '@onecli-sh/sdk';
 import { readEnvFile } from './env.js';
 import { validateAdditionalMounts } from './mount-security.js';
+import {
+  modelEnvArgs,
+  resolveModelRoute,
+  RouteDecision,
+} from './model-router.js';
 import { RegisteredGroup } from './types.js';
 
 const onecli = new OneCLI({ url: ONECLI_URL });
@@ -262,6 +267,7 @@ function buildVolumeMounts(
 async function buildContainerArgs(
   mounts: VolumeMount[],
   containerName: string,
+  route: RouteDecision,
   agentIdentifier?: string,
 ): Promise<string[]> {
   const args: string[] = ['run', '-i', '--rm', '--name', containerName];
@@ -296,14 +302,16 @@ async function buildContainerArgs(
   } else {
     // Fallback when OneCLI gateway is down: route claude-code through the
     // central LLM proxy (core.llm-proxy at host:8090) using the nanoclaw
-    // virtual key. ANTHROPIC_BASE_URL switches the SDK from Anthropic
-    // direct to the proxy's Anthropic-compatible passthrough.
+    // virtual key. The proxy's routed /v1/messages endpoint (not the
+    // /anthropic passthrough) serves the lemon-* model groups and applies
+    // the claude → cloud → local fallbacks; the router picks the group.
     const fallback = readEnvFile(['LITELLM_KEY_NANOCLAW']);
     if (fallback.LITELLM_KEY_NANOCLAW) {
       args.push('-e', `ANTHROPIC_API_KEY=${fallback.LITELLM_KEY_NANOCLAW}`);
-      args.push('-e', 'ANTHROPIC_BASE_URL=http://host.docker.internal:8090/anthropic');
+      args.push('-e', 'ANTHROPIC_BASE_URL=http://host.docker.internal:8090');
+      args.push(...modelEnvArgs(route));
       logger.info(
-        { containerName },
+        { containerName, model: route.model },
         'OneCLI unavailable — fell back to core.llm-proxy with nanoclaw virtual key',
       );
     } else {
@@ -327,7 +335,10 @@ async function buildContainerArgs(
     args.push('-e', `FEED_API_TOKEN=${secrets.FEED_API_TOKEN}`);
   }
   if (secrets.LITELLM_KEY_VAULT_SCRIPTS) {
-    args.push('-e', `LITELLM_KEY_VAULT_SCRIPTS=${secrets.LITELLM_KEY_VAULT_SCRIPTS}`);
+    args.push(
+      '-e',
+      `LITELLM_KEY_VAULT_SCRIPTS=${secrets.LITELLM_KEY_VAULT_SCRIPTS}`,
+    );
     args.push('-e', 'LLM_PROXY_URL=http://host.docker.internal:8090');
   }
 
@@ -372,9 +383,25 @@ export async function runContainerAgent(
   const agentIdentifier = input.isMain
     ? undefined
     : group.folder.toLowerCase().replace(/_/g, '-');
+  const route = await resolveModelRoute(input.prompt);
+  logger.info(
+    {
+      group: group.name,
+      containerName,
+      tier: route.tier,
+      source: route.source,
+      judge: route.judge,
+      judgedTier: route.judgedTier,
+      confidence: route.confidence,
+      latencyMs: route.latencyMs,
+      error: route.error,
+    },
+    'Model route',
+  );
   const containerArgs = await buildContainerArgs(
     mounts,
     containerName,
+    route,
     agentIdentifier,
   );
 
@@ -642,6 +669,7 @@ export async function runContainerAgent(
           `=== Input Summary ===`,
           `Prompt length: ${input.prompt.length} chars`,
           `Session ID: ${input.sessionId || 'new'}`,
+          `Model route: ${route.model} (${route.source}${route.judgedTier ? `, judged ${route.judgedTier} @ ${route.confidence?.toFixed(2)}` : ''})`,
           ``,
           `=== Mounts ===`,
           mounts
