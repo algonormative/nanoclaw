@@ -1,3 +1,4 @@
+import { isPromiseOnly, MAX_PROMISE_NUDGES, PROMISE_NUDGE } from './promise-nudge.js';
 import { findByName, getAllDestinations, type DestinationEntry } from './destinations.js';
 import {
   getPendingMessages,
@@ -377,6 +378,9 @@ export async function processQuery(
   let queryContinuation: string | undefined;
   let done = false;
   let unwrappedNudged = false;
+  // Lemon fork (vault-1t1qn): tool calls this turn, and promise nudges this query.
+  let turnToolCalls = 0;
+  let promiseNudges = 0;
   // Once-per-turn guard for the task-run "<message> block was not delivered"
   // nudge — mirrors unwrappedNudged for chat turns.
   let taskBlockNudged = false;
@@ -575,6 +579,7 @@ export async function processQuery(
     for await (const event of query.events) {
       handleEvent(event, routing);
       touchHeartbeat();
+      if (event.type === 'activity' && event.tool) turnToolCalls++;
 
       if (event.type === 'init') {
         queryContinuation = event.continuation;
@@ -666,6 +671,11 @@ export async function processQuery(
                 `Please re-send your response with the correct wrapping.</system>`,
             );
           }
+          if (!failed && promiseNudges < MAX_PROMISE_NUDGES && isPromiseOnly(resultText, turnToolCalls)) {
+            promiseNudges++;
+            log(`Promise-only turn (no tool calls); nudging (${promiseNudges}/${MAX_PROMISE_NUDGES})`);
+            pushRetry(PROMISE_NUDGE);
+          }
           if (willRetryTaskBlocks) {
             taskBlockNudged = true;
             const names = getAllDestinations()
@@ -687,6 +697,7 @@ export async function processQuery(
         // buffer dies with the turn: a fragment that never closed is not
         // carried into the next turn — the wrap-nudge owns that case.
         midTurnSent = 0;
+        turnToolCalls = 0;
         turnStartSeq = maxOutboundSeq();
         midTurnTail = '';
         const next = queuedTurns.shift();

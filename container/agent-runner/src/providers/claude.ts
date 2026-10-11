@@ -330,7 +330,15 @@ export class ClaudeProvider implements AgentProvider {
           continue;
         }
         messageCount++;
-        yield { type: 'activity' };
+        // Lemon fork (vault-1t1qn): flag tool calls so the poll loop can tell a
+        // turn that did something from one that only promised to.
+        const toolCall =
+          message.type === 'assistant' &&
+          Array.isArray((message as { message?: { content?: Array<{ type?: string }> } }).message?.content) &&
+          (message as { message: { content: Array<{ type?: string }> } }).message.content.some(
+            (block) => block.type === 'tool_use',
+          );
+        yield toolCall ? { type: 'activity', tool: true } : { type: 'activity' };
 
         if (message.type === 'system' && message.subtype === 'init') {
           yield { type: 'init', continuation: message.session_id };

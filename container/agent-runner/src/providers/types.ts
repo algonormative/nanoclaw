@@ -182,4 +182,4 @@ export type ProviderEvent =
    * event (tool call, thinking, partial message, anything) so the
    * poll-loop's idle timer stays honest during long tool runs.
    */
-  | { type: 'activity' };
+  | { type: 'activity'; /** Lemon fork: set when an assistant message carried a tool call. */ tool?: boolean };
