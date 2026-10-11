@@ -9,8 +9,12 @@
  *   host contract (claude) silently drop contributed mounts (see
  *   container-runner buildMounts), while contributed env still applies. The
  *   key was missing from v2 containers until 2026-10-11 for that reason.
- * - Linux tools for the agent (br) from ~/.config/lemon-bin, mounted the
- *   same way at /workspace/extra/lemon-bin and put first on PATH.
+ *   ssh also refuses to run for a uid with no passwd entry ("No user exists
+ *   for uid 501"), and the agent image has none for the host uid. nss_wrapper
+ *   (apt libnss-wrapper, a group package next to openssh-client) supplies one
+ *   to ssh alone, from a one-line passwd file written into the group dir at
+ *   spawn. (br stays out of the container: SQLite WAL over the Docker Desktop
+ *   file share corrupts the host's beads.db.)
  * - a writable copy of the host ~/.gitconfig in the group dir (git rewrites
  *   its config atomically, which a single-file bind mount can't take).
  * - the proxy URL vault scripts inside the container use (the key itself
@@ -25,21 +29,22 @@ import type { ProviderContainerContext, ProviderContainerContribution } from './
 
 const GIT_KEY_DIR = path.join(os.homedir(), '.config', 'lemon-git');
 const GIT_KEY_MOUNT = '/workspace/extra/lemon-git'; // group config mount
-const BIN_DIR = path.join(os.homedir(), '.config', 'lemon-bin');
-const BIN_MOUNT = '/workspace/extra/lemon-bin'; // group config mount
-// The agent image's PATH, with BIN_MOUNT in front.
-const IMAGE_PATH = '/pnpm:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin';
+const NSS_PASSWD = '.nss-passwd'; // in the group dir, read by nss_wrapper
 
 export function lemonContribution(ctx: ProviderContainerContext): ProviderContainerContribution {
   const env: Record<string, string> = {};
   const mounts: NonNullable<ProviderContainerContribution['mounts']> = [];
 
   if (fs.existsSync(path.join(GIT_KEY_DIR, 'id_lemon'))) {
-    env.GIT_SSH_COMMAND = `ssh -F /dev/null -i ${GIT_KEY_MOUNT}/id_lemon -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null`;
-  }
-
-  if (fs.existsSync(path.join(BIN_DIR, 'br'))) {
-    env.PATH = `${BIN_MOUNT}:${IMAGE_PATH}`;
+    const uid = process.getuid?.() ?? 1000;
+    const gid = process.getgid?.() ?? 1000;
+    try {
+      fs.writeFileSync(path.join(ctx.groupDir, NSS_PASSWD), `node:x:${uid}:${gid}:node:/home/node:/bin/sh\n`);
+    } catch (err) {
+      log.warn('lemon: could not write nss passwd file', { err });
+    }
+    const nss = `LD_PRELOAD=libnss_wrapper.so NSS_WRAPPER_PASSWD=/workspace/agent/${NSS_PASSWD} NSS_WRAPPER_GROUP=/etc/group`;
+    env.GIT_SSH_COMMAND = `env ${nss} ssh -F /dev/null -i ${GIT_KEY_MOUNT}/id_lemon -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null`;
   }
 
   const hostGitconfig = path.join(os.homedir(), '.gitconfig');
