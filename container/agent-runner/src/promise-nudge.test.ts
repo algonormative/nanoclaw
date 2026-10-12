@@ -13,8 +13,16 @@ describe('isPromiseOnly', () => {
     expect(isPromiseOnly('Got it. I\'ll update the inventory now.', 0)).toBe(true);
   });
 
-  it('never flags a turn that called tools', () => {
+  it('never flags "let me know"', () => {
     expect(isPromiseOnly('<message to="nick">Let me know if you want more.</message>', 1)).toBe(false);
+  });
+
+  it('flags a bare promise after tool calls (2026-10-12 plotter eval)', () => {
+    expect(isPromiseOnly('<message to="nick">Let me check the plotter status for you.</message>', 1)).toBe(true);
+  });
+
+  it('ignores a real answer after tool calls that ends with an offer', () => {
+    expect(isPromiseOnly('The plotter is offline: the Pi is unreachable. I\'ll check again later if you want.', 2)).toBe(false);
   });
 
   it('ignores mid-sentence offers', () => {

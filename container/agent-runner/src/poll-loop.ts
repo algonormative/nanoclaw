@@ -380,6 +380,8 @@ export async function processQuery(
   let unwrappedNudged = false;
   // Lemon fork (vault-1t1qn): tool calls this turn, and promise nudges this query.
   let turnToolCalls = 0;
+  // A nudge or wrap retry continues the same turn: its tool calls carry over.
+  let carryTools = false;
   let promiseNudges = 0;
   // Once-per-turn guard for the task-run "<message> block was not delivered"
   // nudge — mirrors unwrappedNudged for chat turns.
@@ -671,6 +673,7 @@ export async function processQuery(
             }
           }
           if (willRetryWrapping) {
+            carryTools = true;
             unwrappedNudged = true;
             const destinations = getAllDestinations();
             const names = destinations.map((d) => d.name).join(', ');
@@ -683,10 +686,12 @@ export async function processQuery(
           }
           if (!failed && promiseNudges < MAX_PROMISE_NUDGES && isPromiseOnly(resultText, turnToolCalls)) {
             promiseNudges++;
+            carryTools = true;
             log(`Promise-only turn (no tool calls); nudging (${promiseNudges}/${MAX_PROMISE_NUDGES})`);
             pushRetry(PROMISE_NUDGE);
           } else if (!failed && promiseNudges < MAX_PROMISE_NUDGES && isUnbackedClaim(resultText, turnToolCalls)) {
             promiseNudges++;
+            carryTools = true;
             log(`Unbacked claim (no tool calls); nudging (${promiseNudges}/${MAX_PROMISE_NUDGES})`);
             pushRetry(CLAIM_NUDGE);
           }
@@ -711,7 +716,8 @@ export async function processQuery(
         // buffer dies with the turn: a fragment that never closed is not
         // carried into the next turn — the wrap-nudge owns that case.
         midTurnSent = 0;
-        turnToolCalls = 0;
+        if (!carryTools) turnToolCalls = 0;
+        carryTools = false;
         turnStartSeq = maxOutboundSeq();
         midTurnTail = '';
         const next = queuedTurns.shift();

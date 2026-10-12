@@ -8,7 +8,7 @@
 
 /** A sentence (or message body) that opens with a promise of action. */
 const PROMISE_RE =
-  /(?:^|[.!?\n>]\s*|🍋\s*)(?:let me|i'll|i will|i'm going to|going to|on it|one sec|give me a (?:sec|moment|minute)|checking|looking (?:into|at) (?:it|that|this))\b/i;
+  /(?:^|[.!?\n>]\s*|🍋\s*)(?:let me(?! know)|i'll|i will|i'm going to|going to|on it|one sec|give me a (?:sec|moment|minute)|i'm checking|checking|looking (?:into|at) (?:it|that|this))\b/i;
 
 /** Final texts longer than this are real answers that happen to offer more. */
 const MAX_PROMISE_TEXT = 400;
@@ -46,12 +46,24 @@ export function isUnbackedClaim(resultText: string, toolCalls: number): boolean 
   return Boolean(text) && text.length <= MAX_PROMISE_TEXT && CLAIM_RE.test(text);
 }
 
-/** True when a turn with zero tool calls ended on a promise rather than an answer. */
+/** After tool calls, a final message this short that only promises still means the turn stopped early. */
+const MAX_PROMISE_AFTER_TOOLS = 160;
+
+/**
+ * True when a turn ended on a promise rather than an answer. With zero tool
+ * calls any short promising reply counts. After tool calls only a final message
+ * that is nothing but a promise counts, e.g. 2026-10-12 eval: the plotter skill
+ * loaded, then "Let me check the plotter status for you." and the turn ended.
+ */
 export function isPromiseOnly(resultText: string, toolCalls: number): boolean {
-  if (toolCalls > 0) return false;
   const text = visibleText(resultText);
-  if (!text || text.length > MAX_PROMISE_TEXT) return false;
-  return PROMISE_RE.test(text);
+  if (!text) return false;
+  if (toolCalls === 0) return text.length <= MAX_PROMISE_TEXT && PROMISE_RE.test(text);
+  // After tool calls the message must OPEN with the promise ("Let me check…"),
+  // not merely end with an offer to do more.
+  if (text.length > MAX_PROMISE_AFTER_TOOLS) return false;
+  const m = PROMISE_RE.exec(text);
+  return Boolean(m) && m!.index <= 3;
 }
 
 /**
