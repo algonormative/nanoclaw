@@ -4,15 +4,19 @@
  * ask_user_question is a blocking tool call — it writes a messages_out row
  * with a question card, then polls messages_in for the response.
  */
-import { AjvJsonSchemaValidator } from '@modelcontextprotocol/sdk/validation/ajv';
-import { setTimeout as sleep } from 'node:timers/promises';
+import { AjvJsonSchemaValidator } from "@modelcontextprotocol/sdk/validation/ajv";
+import { setTimeout as sleep } from "node:timers/promises";
 
-import { findQuestionResponse, markCompleted } from '../db/messages-in.js';
-import { writeMessageOut } from '../db/messages-out.js';
-import { getSessionRouting, resolveDestinationThread } from '../db/session-routing.js';
-import { getCurrentReplyRoute } from '../db/session-state.js';
-import { registerTools } from './server.js';
-import type { McpToolDefinition } from './types.js';
+import { findQuestionResponse, markCompleted } from "../db/messages-in.js";
+import { markDone, markWaiting } from "../late-answers.js";
+import { writeMessageOut } from "../db/messages-out.js";
+import {
+  getSessionRouting,
+  resolveDestinationThread,
+} from "../db/session-routing.js";
+import { getCurrentReplyRoute } from "../db/session-state.js";
+import { registerTools } from "./server.js";
+import type { McpToolDefinition } from "./types.js";
 
 function log(msg: string): void {
   console.error(`[mcp-tools] ${msg}`);
@@ -31,7 +35,11 @@ function routing() {
   const session = getSessionRouting();
   const thread =
     session.channel_type && session.platform_id
-      ? resolveDestinationThread(session.channel_type, session.platform_id, getCurrentReplyRoute())
+      ? resolveDestinationThread(
+          session.channel_type,
+          session.platform_id,
+          getCurrentReplyRoute(),
+        )
       : null;
   return { ...session, thread_id: thread?.threadId ?? session.thread_id };
 }
@@ -53,10 +61,11 @@ function routing() {
  * validator was compiled from; a later mutation would silently desync them.
  */
 export const LINK_ACTION_SCHEMA = Object.freeze({
-  type: 'object' as const,
-  description: 'URL link button. Callback buttons are unsupported; use ask_user_question for choices.',
+  type: "object" as const,
+  description:
+    "URL link button. Callback buttons are unsupported; use ask_user_question for choices.",
   properties: {
-    label: { type: 'string' as const, minLength: 1 },
+    label: { type: "string" as const, minLength: 1 },
     // A link button has to go somewhere. A placeholder like '#' or a bare path
     // renders as a dead link, and an agent asked for an approval card reaches
     // for exactly that: it cannot make a callback button, so it fakes one.
@@ -76,19 +85,22 @@ export const LINK_ACTION_SCHEMA = Object.freeze({
     // host character excludes '#', '/' and '?'. Non-ASCII URLs are normalized
     // with `new URL()` before validation (see normalizeLinkUrl).
     url: {
-      type: 'string' as const,
-      pattern: '^[hH][tT][tT][pP][sS]?://[!$-.0->@-[\\]-~][!#-[\\]-~]*$',
+      type: "string" as const,
+      pattern: "^[hH][tT][tT][pP][sS]?://[!$-.0->@-[\\]-~][!#-[\\]-~]*$",
       description: "Web link (http or https), e.g. 'https://example.com'.",
     },
     style: {
-      description: "One of 'primary', 'danger' or 'default'; any other value renders as 'default'.",
+      description:
+        "One of 'primary', 'danger' or 'default'; any other value renders as 'default'.",
     },
   },
-  required: ['label', 'url'],
+  required: ["label", "url"],
 });
 
 /** Compiled once: the handler runs it per action on every send_card call. */
-const validateLinkAction = new AjvJsonSchemaValidator().getValidator<Record<string, unknown>>(LINK_ACTION_SCHEMA);
+const validateLinkAction = new AjvJsonSchemaValidator().getValidator<
+  Record<string, unknown>
+>(LINK_ACTION_SCHEMA);
 
 /**
  * Split a card's actions into the ones the bridge will render and a count of
@@ -104,9 +116,9 @@ const NON_ASCII = /[^\x00-\x7F]/;
  * validated exactly as the agent sent it.
  */
 function normalizeLinkUrl(action: unknown): unknown {
-  if (typeof action !== 'object' || action === null) return action;
+  if (typeof action !== "object" || action === null) return action;
   const url = (action as { url?: unknown }).url;
-  if (typeof url !== 'string' || !NON_ASCII.test(url)) return action;
+  if (typeof url !== "string" || !NON_ASCII.test(url)) return action;
   try {
     return { ...action, url: new URL(url).href };
   } catch {
@@ -114,7 +126,10 @@ function normalizeLinkUrl(action: unknown): unknown {
   }
 }
 
-function partitionActions(card: Record<string, unknown>): { card: Record<string, unknown>; dropped: number } {
+function partitionActions(card: Record<string, unknown>): {
+  card: Record<string, unknown>;
+  dropped: number;
+} {
   const actions = card.actions;
   if (!Array.isArray(actions)) return { card, dropped: 0 };
 
@@ -123,63 +138,81 @@ function partitionActions(card: Record<string, unknown>): { card: Record<string,
   const changed = normalized.some((action, index) => action !== actions[index]);
   if (valid.length === actions.length && !changed) return { card, dropped: 0 };
 
-  return { card: { ...card, actions: valid }, dropped: actions.length - valid.length };
+  return {
+    card: { ...card, actions: valid },
+    dropped: actions.length - valid.length,
+  };
 }
 
 function ok(text: string) {
-  return { content: [{ type: 'text' as const, text }] };
+  return { content: [{ type: "text" as const, text }] };
 }
 
 function err(text: string) {
-  return { content: [{ type: 'text' as const, text: `Error: ${text}` }], isError: true };
+  return {
+    content: [{ type: "text" as const, text: `Error: ${text}` }],
+    isError: true,
+  };
 }
 
 export const askUserQuestion: McpToolDefinition = {
   tool: {
-    name: 'ask_user_question',
+    name: "ask_user_question",
     description:
       'Ask the user a multiple-choice question and wait for their response. This is a blocking call — execution pauses until the user responds or the timeout expires. Provide a short card title (e.g. "Confirm deletion") and an array of options — each option may be a plain string (used as both button label and result value) or an object { label, selectedLabel?, value? } where selectedLabel is the text shown on the card after the user clicks.',
     inputSchema: {
-      type: 'object' as const,
+      type: "object" as const,
       properties: {
-        title: { type: 'string', description: 'Short card title shown above the question' },
-        question: { type: 'string', description: 'The question to ask' },
+        title: {
+          type: "string",
+          description: "Short card title shown above the question",
+        },
+        question: { type: "string", description: "The question to ask" },
         options: {
-          type: 'array',
+          type: "array",
           items: {
             oneOf: [
-              { type: 'string' },
+              { type: "string" },
               {
-                type: 'object',
+                type: "object",
                 properties: {
-                  label: { type: 'string' },
-                  selectedLabel: { type: 'string' },
-                  value: { type: 'string' },
+                  label: { type: "string" },
+                  selectedLabel: { type: "string" },
+                  value: { type: "string" },
                 },
-                required: ['label'],
+                required: ["label"],
               },
             ],
           },
-          description: 'Options for the user to choose from (string or {label, selectedLabel?, value?})',
+          description:
+            "Options for the user to choose from (string or {label, selectedLabel?, value?})",
         },
-        timeout: { type: 'number', description: 'Timeout in seconds (default: 300)' },
+        timeout: {
+          type: "number",
+          description: "Timeout in seconds (default: 300)",
+        },
       },
-      required: ['title', 'question', 'options'],
+      required: ["title", "question", "options"],
     },
   },
   async handler(args, context) {
-    if (context?.signal.aborted) return err('Question cancelled');
+    if (context?.signal.aborted) return err("Question cancelled");
     const title = args.title as string;
     const question = args.question as string;
     const rawOptions = args.options as unknown[];
     const timeout = ((args.timeout as number) || 300) * 1000;
     if (!title || !question || !rawOptions?.length) {
-      return err('title, question, and options are required');
+      return err("title, question, and options are required");
     }
 
     const options = rawOptions.map((o) => {
-      if (typeof o === 'string') return { label: o, selectedLabel: o, value: o };
-      const obj = o as { label: string; selectedLabel?: string; value?: string };
+      if (typeof o === "string")
+        return { label: o, selectedLabel: o, value: o };
+      const obj = o as {
+        label: string;
+        selectedLabel?: string;
+        value?: string;
+      };
       return {
         label: obj.label,
         selectedLabel: obj.selectedLabel ?? obj.label,
@@ -193,12 +226,12 @@ export const askUserQuestion: McpToolDefinition = {
     // Write question card to outbound.db
     await writeMessageOut({
       id: questionId,
-      kind: 'chat-sdk',
+      kind: "chat-sdk",
       platform_id: r.platform_id,
       channel_type: r.channel_type,
       thread_id: r.thread_id,
       content: JSON.stringify({
-        type: 'ask_question',
+        type: "ask_question",
         questionId,
         title,
         question,
@@ -206,83 +239,102 @@ export const askUserQuestion: McpToolDefinition = {
       }),
     });
 
-    log(`ask_user_question: ${questionId} → "${question}" [${options.join(', ')}]`);
+    log(
+      `ask_user_question: ${questionId} → "${question}" [${options.join(", ")}]`,
+    );
+
+    // Lemon fork: a marker lets the poll loop surface a tap that comes after we stop waiting.
+    markWaiting(questionId, {
+      title,
+      options: options.map((o) => ({ label: o.label, value: o.value })),
+    });
 
     // Poll for response in inbound.db (host writes the response there)
     const deadline = Date.now() + timeout;
     while (Date.now() < deadline) {
-      if (context?.signal.aborted) return err('Question cancelled');
+      if (context?.signal.aborted) {
+        markDone(questionId, true);
+        return err("Question cancelled");
+      }
       const response = findQuestionResponse(questionId);
 
       if (response) {
         const parsed = JSON.parse(response.content);
         // Mark the response as completed via processing_ack (outbound.db)
         markCompleted([response.id]);
+        markDone(questionId, false);
 
-        log(`ask_user_question response: ${questionId} → ${parsed.selectedOption}`);
+        log(
+          `ask_user_question response: ${questionId} → ${parsed.selectedOption}`,
+        );
         return ok(parsed.selectedOption);
       }
 
       try {
         await sleep(1000, undefined, { signal: context?.signal });
       } catch (error) {
-        if (context?.signal.aborted) return err('Question cancelled');
+        if (context?.signal.aborted) return err("Question cancelled");
         throw error;
       }
     }
 
     log(`ask_user_question timeout: ${questionId}`);
-    return err(`Question timed out after ${timeout / 1000}s`);
+    markDone(questionId, true);
+    return err(
+      `Question timed out after ${timeout / 1000}s. The buttons stay live: if the user taps one later, ` +
+        "it arrives as a new message and you should act on it then.",
+    );
   },
 };
 
 export const sendCard: McpToolDefinition = {
   tool: {
-    name: 'send_card',
-    description: 'Send a display card with optional URL link buttons to the current conversation.',
+    name: "send_card",
+    description:
+      "Send a display card with optional URL link buttons to the current conversation.",
     inputSchema: {
-      type: 'object' as const,
+      type: "object" as const,
       properties: {
         card: {
-          type: 'object',
+          type: "object",
           description:
-            'Display card with optional title, description, text children, and URL link actions. Each action requires a non-empty label and a url that is a web link (http or https); invalid actions are dropped. Callback buttons are unsupported; use ask_user_question for choices.',
+            "Display card with optional title, description, text children, and URL link actions. Each action requires a non-empty label and a url that is a web link (http or https); invalid actions are dropped. Callback buttons are unsupported; use ask_user_question for choices.",
           properties: {
-            title: { type: 'string' },
-            description: { type: 'string' },
+            title: { type: "string" },
+            description: { type: "string" },
             children: {
-              type: 'array',
+              type: "array",
               description:
-                'Text content only: strings or objects with a text field. Nested action blocks are unsupported.',
+                "Text content only: strings or objects with a text field. Nested action blocks are unsupported.",
               items: {
                 anyOf: [
-                  { type: 'string' },
+                  { type: "string" },
                   {
-                    type: 'object',
-                    properties: { text: { type: 'string' } },
-                    required: ['text'],
+                    type: "object",
+                    properties: { text: { type: "string" } },
+                    required: ["text"],
                   },
                 ],
               },
             },
             actions: {
-              type: 'array',
+              type: "array",
               items: LINK_ACTION_SCHEMA,
             },
           },
         },
         fallbackText: {
-          type: 'string',
+          type: "string",
           description:
-            'Plain-text version of the card for channels that render cards as text. Not related to buttons: send_card never renders callback buttons anywhere.',
+            "Plain-text version of the card for channels that render cards as text. Not related to buttons: send_card never renders callback buttons anywhere.",
         },
       },
-      required: ['card'],
+      required: ["card"],
     },
   },
   async handler(args) {
     const card = args.card as Record<string, unknown>;
-    if (!card) return err('card is required');
+    if (!card) return err("card is required");
 
     const id = generateId();
     const r = routing();
@@ -290,11 +342,15 @@ export const sendCard: McpToolDefinition = {
 
     await writeMessageOut({
       id,
-      kind: 'chat-sdk',
+      kind: "chat-sdk",
       platform_id: r.platform_id,
       channel_type: r.channel_type,
       thread_id: r.thread_id,
-      content: JSON.stringify({ type: 'card', card: renderable, fallbackText: (args.fallbackText as string) || '' }),
+      content: JSON.stringify({
+        type: "card",
+        card: renderable,
+        fallbackText: (args.fallbackText as string) || "",
+      }),
     });
 
     log(`send_card: ${id}`);

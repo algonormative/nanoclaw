@@ -1,3 +1,4 @@
+import { surfaceLateAnswers } from './late-answers.js';
 import {
   buildSilentNudge,
   CLAIM_NUDGE,
@@ -139,7 +140,7 @@ export async function runPollLoop(config: PollLoopConfig): Promise<void> {
   while (true) {
     if (config.signal?.aborted) return;
     // Skip system messages — they're responses for MCP tools (e.g., ask_user_question)
-    const messages = getPendingMessages(isFirstPoll).filter((m) => m.kind !== 'system');
+    const messages = surfaceLateAnswers(getPendingMessages(isFirstPoll)).filter((m) => m.kind !== 'system');
     isFirstPoll = false;
     pollCount++;
 
@@ -486,7 +487,7 @@ export async function processQuery(
 
     void (async () => {
       try {
-        const pending = getPendingMessages();
+        const pending = surfaceLateAnswers(getPendingMessages());
 
         // Slash commands need a fresh query: /clear resets the SDK's
         // resume id (fixed at sdkQuery() time); admin/passthrough commands
