@@ -73,5 +73,32 @@ export function lemonContribution(ctx: ProviderContainerContext): ProviderContai
   env.LITELLM_KEY_VAULT_SCRIPTS = 'gateway-managed';
   env.LLM_PROXY_URL = 'http://host.docker.internal:8090';
 
+  // Claude Code's native OTEL traces (beta) into lookout: one
+  // claude_code.interaction per turn with llm_request and tool children,
+  // content included (it stays on the mini). traceparent goes to LiteLLM so
+  // its spans can join the turn. Groups opt in via LEMON_OTEL_GROUPS (folder
+  // names, comma-separated); lemon_eval first (vault-2m4pe).
+  const otelGroups = (process.env.LEMON_OTEL_GROUPS ?? 'lemon_eval').split(',').map((s) => s.trim());
+  const folder = path.basename(ctx.groupDir);
+  if (otelGroups.includes(folder)) {
+    Object.assign(env, {
+      CLAUDE_CODE_ENABLE_TELEMETRY: '1',
+      CLAUDE_CODE_ENHANCED_TELEMETRY_BETA: '1',
+      OTEL_TRACES_EXPORTER: 'otlp',
+      OTEL_METRICS_EXPORTER: 'none',
+      OTEL_LOGS_EXPORTER: 'none',
+      OTEL_EXPORTER_OTLP_TRACES_PROTOCOL: 'http/protobuf',
+      OTEL_EXPORTER_OTLP_TRACES_ENDPOINT: 'http://host.docker.internal:4318/v1/traces',
+      OTEL_SERVICE_NAME: 'nanoclaw-agent',
+      OTEL_RESOURCE_ATTRIBUTES: `service.name=nanoclaw-agent,agent.name=${folder}`,
+      OTEL_LOG_USER_PROMPTS: '1',
+      OTEL_LOG_TOOL_DETAILS: '1',
+      OTEL_LOG_TOOL_CONTENT: '1',
+      OTEL_LOG_ASSISTANT_RESPONSES: '1',
+      CLAUDE_CODE_OTEL_CONTENT_MAX_LENGTH: '8000',
+      CLAUDE_CODE_PROPAGATE_TRACEPARENT: '1',
+    });
+  }
+
   return { env, mounts };
 }
