@@ -34,3 +34,22 @@ export function isPromiseOnly(resultText: string, toolCalls: number): boolean {
   if (!text || text.length > MAX_PROMISE_TEXT) return false;
   return PROMISE_RE.test(text);
 }
+
+/**
+ * Plain text for an unwrapped chat reply that survived the wrap nudge, or ''
+ * when it shouldn't be delivered. The local model sometimes keeps answering
+ * without <message> tags; in a chat turn the only reader is the sender, so the
+ * visible text goes to them instead of vanishing. Botched tool-call syntax is
+ * never delivered.
+ */
+export function plainReplyText(resultText: string): string {
+  if (/<(skill|invoke|function_calls|parameter|tool_use)\b/i.test(resultText)) return '';
+  const text = resultText
+    .replace(/<internal>[\s\S]*?<\/internal>/gi, ' ')
+    .replace(/<to>[\s\S]*?<\/to>/gi, ' ')
+    .replace(/<\/?[a-z_][^>]*>/gi, ' ')
+    .replace(/[ \t]+/g, ' ')
+    .replace(/\s*\n\s*/g, '\n')
+    .trim();
+  return text.length >= 2 ? text : '';
+}

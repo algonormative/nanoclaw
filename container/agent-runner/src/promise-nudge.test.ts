@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'bun:test';
 
-import { isPromiseOnly } from './promise-nudge.js';
+import { isPromiseOnly, plainReplyText } from './promise-nudge.js';
 
 describe('isPromiseOnly', () => {
   it('flags the 2026-10-11 battery reply', () => {
@@ -27,5 +27,23 @@ describe('isPromiseOnly', () => {
 
   it('ignores internal scratchpad text', () => {
     expect(isPromiseOnly('<internal>let me think</internal><message to="nick">Done.</message>', 0)).toBe(false);
+  });
+});
+
+describe('plainReplyText', () => {
+  it('keeps a plain reply', () => {
+    expect(plainReplyText('Hey! 👋 Good to chat. What is on your mind? 🍋')).toBe('Hey! 👋 Good to chat. What is on your mind? 🍋');
+  });
+  it('drops internal notes and stray tags', () => {
+    expect(plainReplyText('<internal>thinking</internal>The plotter is offline.')).toBe('The plotter is offline.');
+  });
+  it('unwraps a hand-written send_message block', () => {
+    expect(plainReplyText('<send_message> <to>nick</to> Got it, updated. </send_message>')).toBe('Got it, updated.');
+  });
+  it('never delivers botched tool calls', () => {
+    expect(plainReplyText('<Skill> <skill>plotter</skill> <args>{}</args> </Skill>')).toBe('');
+  });
+  it('returns empty for internal-only output', () => {
+    expect(plainReplyText('<internal>nothing to send</internal>')).toBe('');
   });
 });

@@ -1,4 +1,4 @@
-import { isPromiseOnly, MAX_PROMISE_NUDGES, PROMISE_NUDGE } from './promise-nudge.js';
+import { isPromiseOnly, MAX_PROMISE_NUDGES, plainReplyText, PROMISE_NUDGE } from './promise-nudge.js';
 import { findByName, getAllDestinations, type DestinationEntry } from './destinations.js';
 import {
   getPendingMessages,
@@ -660,6 +660,16 @@ export async function processQuery(
             continuation: queryContinuation ?? initialContinuation,
             status: failed ? 'error' : hasUnwrapped || willRetryTaskBlocks ? 'undelivered' : 'completed',
           });
+          // Lemon fork: the wrap nudge fires once per query, so a later unwrapped
+          // chat reply (or a retry that is still unwrapped) used to vanish. In a
+          // chat turn the sender is the only reader, so deliver the visible text.
+          if (!failed && hasUnwrapped && unwrappedNudged && !routing.taskRun) {
+            const plain = plainReplyText(resultText);
+            if (plain) {
+              log('Unwrapped chat reply after the wrap nudge; delivering it as plain text');
+              await deliverPlainReply(routing, plain);
+            }
+          }
           if (willRetryWrapping) {
             unwrappedNudged = true;
             const destinations = getAllDestinations();
@@ -799,6 +809,19 @@ function sendsFailureNotice(routing: RoutingContext): boolean {
 }
 
 /** Send the dedicated provider error or a generic failure notice. */
+/** Lemon fork: deliver plain reply text to the turn's origin (see plainReplyText). */
+async function deliverPlainReply(routing: RoutingContext, text: string): Promise<void> {
+  await writeMessageOut({
+    id: generateId(),
+    in_reply_to: routing.inReplyTo,
+    kind: 'chat',
+    platform_id: routing.platformId,
+    channel_type: routing.channelType,
+    thread_id: routing.threadId,
+    content: JSON.stringify({ text: stripHarnessTagArtifacts(text) }),
+  });
+}
+
 async function deliverErrorResult(routing: RoutingContext, text: string): Promise<void> {
   log('Error result notice — delivering to channel');
   await writeMessageOut({
