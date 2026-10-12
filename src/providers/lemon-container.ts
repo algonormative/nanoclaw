@@ -24,6 +24,7 @@ import fs from 'fs';
 import os from 'os';
 import path from 'path';
 
+import { readEnvFile } from '../env.js';
 import { log } from '../log.js';
 import type { ProviderContainerContext, ProviderContainerContribution } from './provider-container-registry.js';
 
@@ -78,7 +79,9 @@ export function lemonContribution(ctx: ProviderContainerContext): ProviderContai
   // content included (it stays on the mini). traceparent goes to LiteLLM so
   // its spans can join the turn. Groups opt in via LEMON_OTEL_GROUPS (folder
   // names, comma-separated); lemon_eval first (vault-2m4pe).
-  const otelGroups = (process.env.LEMON_OTEL_GROUPS ?? 'lemon_eval').split(',').map((s) => s.trim());
+  const otelSetting =
+    readEnvFile(['LEMON_OTEL_GROUPS']).LEMON_OTEL_GROUPS ?? process.env.LEMON_OTEL_GROUPS ?? 'lemon_eval';
+  const otelGroups = otelSetting.split(',').map((s) => s.trim());
   const folder = path.basename(ctx.groupDir);
   if (otelGroups.includes(folder)) {
     Object.assign(env, {
