@@ -396,6 +396,7 @@ export async function processQuery(
   let carryTools = false;
   let promiseNudges = 0;
   let silentNudges = 0;
+  let retriesPushed = 0;
   // Lemon fork: the visible text of an unwrapped chat answer, kept when the wrap
   // nudge fires. fix-probe (2026-10-12): the retry came back as <internal>
   // "I need to re-send" and the finished answer was lost.
@@ -461,6 +462,7 @@ export async function processQuery(
   // A retry is another provider input, behind any follow-ups already pushed.
   // Preserve its original route, prompt and retry guards until it is answered.
   const pushRetry = (prompt: string): void => {
+    retriesPushed++;
     query.push(prompt);
     queuedTurns.push({ routing: { ...routing }, unwrappedNudged, taskBlockNudged });
     archivePrompts.push(archivePrompts[0] ?? initialPrompt);
@@ -623,8 +625,12 @@ export async function processQuery(
           midTurnTail = scan.tail;
         }
       } else if (event.type === 'result') {
-        const queuedAtResult = queuedTurns.length;
-        const retriedThisResult = (): boolean => queuedTurns.length > queuedAtResult;
+        // Lemon fork: counts pushRetry calls, not queue length (follow-ups queue too).
+        const retriesAtResult = retriesPushed;
+        const retriedThisResult = (): boolean => retriesPushed > retriesAtResult;
+        // A fallback send this result. chatRowWrittenSince only sees rows the host
+        // hasn't delivered yet, so it can miss one the host already picked up.
+        let fallbackSent = false;
         // A result — with or without text — means the turn is done. Mark
         // the initial batch completed now so the host sweep doesn't see
         // stale 'processing' claims while the query stays open for
@@ -689,6 +695,7 @@ export async function processQuery(
             if (plain) {
               log('Unwrapped chat reply after the wrap nudge; delivering it as plain text');
               await deliverPlainReply(routing, plain);
+              fallbackSent = true;
             }
           }
           if (willRetryWrapping) {
@@ -722,10 +729,11 @@ export async function processQuery(
             stashedReply &&
             !willRetryWrapping &&
             !routing.taskRun &&
-            !(midTurnSent > 0 || chatRowWrittenSince(turnStartSeq))
+            !(fallbackSent || midTurnSent > 0 || chatRowWrittenSince(turnStartSeq))
           ) {
             log('Wrap retry delivered nothing; sending the earlier unwrapped answer');
             await deliverPlainReply(routing, stashedReply);
+            fallbackSent = true;
           }
           // Plain prose only: a half-open <message> fragment stays dropped (upstream rule).
           stashedReply =
@@ -735,7 +743,7 @@ export async function processQuery(
             !retriedThisResult() &&
             silentNudges < MAX_SILENT_NUDGES &&
             isChatTurn(routing) &&
-            isSilentTurn(turnToolCalls, midTurnSent > 0 || chatRowWrittenSince(turnStartSeq))
+            isSilentTurn(turnToolCalls, fallbackSent || midTurnSent > 0 || chatRowWrittenSince(turnStartSeq))
           ) {
             silentNudges++;
             carryTools = true;
@@ -756,13 +764,14 @@ export async function processQuery(
           if (stashedReply && !routing.taskRun && !(midTurnSent > 0 || chatRowWrittenSince(turnStartSeq))) {
             log('Wrap retry came back empty; sending the earlier unwrapped answer');
             await deliverPlainReply(routing, stashedReply);
+            fallbackSent = true;
           }
           stashedReply = '';
           if (
             !retriedThisResult() &&
             silentNudges < MAX_SILENT_NUDGES &&
             isChatTurn(routing) &&
-            isSilentTurn(turnToolCalls, midTurnSent > 0 || chatRowWrittenSince(turnStartSeq))
+            isSilentTurn(turnToolCalls, fallbackSent || midTurnSent > 0 || chatRowWrittenSince(turnStartSeq))
           ) {
             silentNudges++;
             carryTools = true;
