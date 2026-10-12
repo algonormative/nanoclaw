@@ -396,6 +396,10 @@ export async function processQuery(
   let carryTools = false;
   let promiseNudges = 0;
   let silentNudges = 0;
+  // Lemon fork: the visible text of an unwrapped chat answer, kept when the wrap
+  // nudge fires. fix-probe (2026-10-12): the retry came back as <internal>
+  // "I need to re-send" and the finished answer was lost.
+  let stashedReply = '';
   // Once-per-turn guard for the task-run "<message> block was not delivered"
   // nudge — mirrors unwrappedNudged for chat turns.
   let taskBlockNudged = false;
@@ -715,6 +719,19 @@ export async function processQuery(
           }
           if (
             !failed &&
+            stashedReply &&
+            !willRetryWrapping &&
+            !routing.taskRun &&
+            !(midTurnSent > 0 || chatRowWrittenSince(turnStartSeq))
+          ) {
+            log('Wrap retry delivered nothing; sending the earlier unwrapped answer');
+            await deliverPlainReply(routing, stashedReply);
+          }
+          // Plain prose only: a half-open <message> fragment stays dropped (upstream rule).
+          stashedReply =
+            willRetryWrapping && !routing.taskRun && !/<message\b/i.test(resultText) ? plainReplyText(resultText) : '';
+          if (
+            !failed &&
             !retriedThisResult() &&
             silentNudges < MAX_SILENT_NUDGES &&
             isChatTurn(routing) &&
@@ -736,6 +753,11 @@ export async function processQuery(
           // user prompt at their own position in the FIFO queue.
           archivePrompts.shift();
         } else {
+          if (stashedReply && !routing.taskRun && !(midTurnSent > 0 || chatRowWrittenSince(turnStartSeq))) {
+            log('Wrap retry came back empty; sending the earlier unwrapped answer');
+            await deliverPlainReply(routing, stashedReply);
+          }
+          stashedReply = '';
           if (
             !retriedThisResult() &&
             silentNudges < MAX_SILENT_NUDGES &&
