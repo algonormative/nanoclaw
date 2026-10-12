@@ -27,6 +27,25 @@ function visibleText(text: string): string {
     .trim();
 }
 
+/**
+ * A reply that reports a completed action ("logged", "updated", "queued"…).
+ * In a turn with zero tool calls such a claim cannot be true: 2026-10-11 evals
+ * caught "Got it — 3 SR44 spares logged 🍋" with nothing written.
+ */
+const CLAIM_RE =
+  /\b(?:logged|updated|added|saved|recorded|filed|queued|pushed|synced|created|deleted|cancelled|scheduled|committed|stored)\b/i;
+
+export const CLAIM_NUDGE =
+  '<system>Your reply says something was done, but no tool ran this turn, so nothing was actually changed. ' +
+  'Do it now with the tools and then confirm, or correct your reply.</system>';
+
+/** True when a zero-tool turn claims an action happened. */
+export function isUnbackedClaim(resultText: string, toolCalls: number): boolean {
+  if (toolCalls > 0) return false;
+  const text = visibleText(resultText);
+  return Boolean(text) && text.length <= MAX_PROMISE_TEXT && CLAIM_RE.test(text);
+}
+
 /** True when a turn with zero tool calls ended on a promise rather than an answer. */
 export function isPromiseOnly(resultText: string, toolCalls: number): boolean {
   if (toolCalls > 0) return false;

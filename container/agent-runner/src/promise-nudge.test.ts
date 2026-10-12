@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'bun:test';
 
-import { isPromiseOnly, plainReplyText } from './promise-nudge.js';
+import { isPromiseOnly, isUnbackedClaim, plainReplyText } from './promise-nudge.js';
 
 describe('isPromiseOnly', () => {
   it('flags the 2026-10-11 battery reply', () => {
@@ -45,5 +45,17 @@ describe('plainReplyText', () => {
   });
   it('returns empty for internal-only output', () => {
     expect(plainReplyText('<internal>nothing to send</internal>')).toBe('');
+  });
+});
+
+describe('isUnbackedClaim', () => {
+  it('flags the 2026-10-11 eval reply', () => {
+    expect(isUnbackedClaim('<message to="nick">Got it — 3 SR44 spares for the laser level logged 🍋</message>', 0)).toBe(true);
+  });
+  it('never flags a turn that called tools', () => {
+    expect(isUnbackedClaim('Updated the count to 3.', 2)).toBe(false);
+  });
+  it('ignores plain conversation', () => {
+    expect(isUnbackedClaim('Nice! What is on your mind?', 0)).toBe(false);
   });
 });

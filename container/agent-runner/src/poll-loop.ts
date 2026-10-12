@@ -1,4 +1,4 @@
-import { isPromiseOnly, MAX_PROMISE_NUDGES, plainReplyText, PROMISE_NUDGE } from './promise-nudge.js';
+import { CLAIM_NUDGE, isPromiseOnly, isUnbackedClaim, MAX_PROMISE_NUDGES, plainReplyText, PROMISE_NUDGE } from './promise-nudge.js';
 import { findByName, getAllDestinations, type DestinationEntry } from './destinations.js';
 import {
   getPendingMessages,
@@ -685,6 +685,10 @@ export async function processQuery(
             promiseNudges++;
             log(`Promise-only turn (no tool calls); nudging (${promiseNudges}/${MAX_PROMISE_NUDGES})`);
             pushRetry(PROMISE_NUDGE);
+          } else if (!failed && promiseNudges < MAX_PROMISE_NUDGES && isUnbackedClaim(resultText, turnToolCalls)) {
+            promiseNudges++;
+            log(`Unbacked claim (no tool calls); nudging (${promiseNudges}/${MAX_PROMISE_NUDGES})`);
+            pushRetry(CLAIM_NUDGE);
           }
           if (willRetryTaskBlocks) {
             taskBlockNudged = true;
