@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'bun:test';
 
-import { isPromiseOnly, isUnbackedClaim, plainReplyText } from './promise-nudge.js';
+import { isFakeToolCall, isPromiseOnly, isSilentTurn, isUnbackedClaim, plainReplyText } from './promise-nudge.js';
 
 describe('isPromiseOnly', () => {
   it('flags the 2026-10-11 battery reply', () => {
@@ -10,7 +10,7 @@ describe('isPromiseOnly', () => {
   });
 
   it('flags a promise after a short acknowledgement', () => {
-    expect(isPromiseOnly('Got it. I\'ll update the inventory now.', 0)).toBe(true);
+    expect(isPromiseOnly("Got it. I'll update the inventory now.", 0)).toBe(true);
   });
 
   it('never flags "let me know"', () => {
@@ -22,7 +22,9 @@ describe('isPromiseOnly', () => {
   });
 
   it('ignores a real answer after tool calls that ends with an offer', () => {
-    expect(isPromiseOnly('The plotter is offline: the Pi is unreachable. I\'ll check again later if you want.', 2)).toBe(false);
+    expect(isPromiseOnly("The plotter is offline: the Pi is unreachable. I'll check again later if you want.", 2)).toBe(
+      false,
+    );
   });
 
   it('ignores mid-sentence offers', () => {
@@ -40,7 +42,9 @@ describe('isPromiseOnly', () => {
 
 describe('plainReplyText', () => {
   it('keeps a plain reply', () => {
-    expect(plainReplyText('Hey! 👋 Good to chat. What is on your mind? 🍋')).toBe('Hey! 👋 Good to chat. What is on your mind? 🍋');
+    expect(plainReplyText('Hey! 👋 Good to chat. What is on your mind? 🍋')).toBe(
+      'Hey! 👋 Good to chat. What is on your mind? 🍋',
+    );
   });
   it('drops internal notes and stray tags', () => {
     expect(plainReplyText('<internal>thinking</internal>The plotter is offline.')).toBe('The plotter is offline.');
@@ -58,12 +62,42 @@ describe('plainReplyText', () => {
 
 describe('isUnbackedClaim', () => {
   it('flags the 2026-10-11 eval reply', () => {
-    expect(isUnbackedClaim('<message to="nick">Got it — 3 SR44 spares for the laser level logged 🍋</message>', 0)).toBe(true);
+    expect(
+      isUnbackedClaim('<message to="nick">Got it — 3 SR44 spares for the laser level logged 🍋</message>', 0),
+    ).toBe(true);
   });
   it('never flags a turn that called tools', () => {
     expect(isUnbackedClaim('Updated the count to 3.', 2)).toBe(false);
   });
   it('ignores plain conversation', () => {
     expect(isUnbackedClaim('Nice! What is on your mind?', 0)).toBe(false);
+  });
+});
+
+describe('isFakeToolCall', () => {
+  it('flags a skill call typed as text (clean-x2, Sun card)', () => {
+    expect(isFakeToolCall('<skill name="plotter">Sun card</skill>', 0)).toBe(true);
+  });
+
+  it('ignores markup once a real tool ran', () => {
+    expect(isFakeToolCall('<skill name="plotter">Sun card</skill>', 1)).toBe(false);
+  });
+
+  it('ignores ordinary replies', () => {
+    expect(isFakeToolCall('<message to="nick">Which Sun card, the 70 x 120 one?</message>', 0)).toBe(false);
+  });
+});
+
+describe('isSilentTurn', () => {
+  it('flags an internal-only turn with no tools and nothing sent', () => {
+    expect(isSilentTurn(0, false)).toBe(true);
+  });
+
+  it('accepts a turn that sent something', () => {
+    expect(isSilentTurn(0, true)).toBe(false);
+  });
+
+  it('accepts a turn that ran tools', () => {
+    expect(isSilentTurn(2, false)).toBe(false);
   });
 });

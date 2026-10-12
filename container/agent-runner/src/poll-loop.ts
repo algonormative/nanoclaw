@@ -1,4 +1,16 @@
-import { CLAIM_NUDGE, isPromiseOnly, isUnbackedClaim, MAX_PROMISE_NUDGES, plainReplyText, PROMISE_NUDGE } from './promise-nudge.js';
+import {
+  buildSilentNudge,
+  CLAIM_NUDGE,
+  FAKE_TOOL_NUDGE,
+  isFakeToolCall,
+  isPromiseOnly,
+  isSilentTurn,
+  isUnbackedClaim,
+  MAX_PROMISE_NUDGES,
+  MAX_SILENT_NUDGES,
+  plainReplyText,
+  PROMISE_NUDGE,
+} from './promise-nudge.js';
 import { findByName, getAllDestinations, type DestinationEntry } from './destinations.js';
 import {
   getPendingMessages,
@@ -383,6 +395,7 @@ export async function processQuery(
   // A nudge or wrap retry continues the same turn: its tool calls carry over.
   let carryTools = false;
   let promiseNudges = 0;
+  let silentNudges = 0;
   // Once-per-turn guard for the task-run "<message> block was not delivered"
   // nudge — mirrors unwrappedNudged for chat turns.
   let taskBlockNudged = false;
@@ -606,6 +619,8 @@ export async function processQuery(
           midTurnTail = scan.tail;
         }
       } else if (event.type === 'result') {
+        const queuedAtResult = queuedTurns.length;
+        const retriedThisResult = (): boolean => queuedTurns.length > queuedAtResult;
         // A result — with or without text — means the turn is done. Mark
         // the initial batch completed now so the host sweep doesn't see
         // stale 'processing' claims while the query stays open for
@@ -677,7 +692,10 @@ export async function processQuery(
             unwrappedNudged = true;
             const destinations = getAllDestinations();
             const names = destinations.map((d) => d.name).join(', ');
-            pushRetry(
+            if (isFakeToolCall(resultText, turnToolCalls)) {
+              log('Tool call written as text; nudging to call it');
+              pushRetry(FAKE_TOOL_NUDGE);
+            } else pushRetry(
               `<system>Your response was not delivered — it was not wrapped in <message to="name">...</message> blocks. ` +
                 `All output must be wrapped: use <message to="name"> for content to send, or <internal> for scratchpad. ` +
                 `Your destinations: ${names}. ` +
@@ -695,6 +713,18 @@ export async function processQuery(
             log(`Unbacked claim (no tool calls); nudging (${promiseNudges}/${MAX_PROMISE_NUDGES})`);
             pushRetry(CLAIM_NUDGE);
           }
+          if (
+            !failed &&
+            !retriedThisResult() &&
+            silentNudges < MAX_SILENT_NUDGES &&
+            isChatTurn(routing) &&
+            isSilentTurn(turnToolCalls, midTurnSent > 0 || chatRowWrittenSince(turnStartSeq))
+          ) {
+            silentNudges++;
+            carryTools = true;
+            log('Silent chat turn (no tool calls, nothing sent); nudging');
+            pushRetry(buildSilentNudge(getAllDestinations().map((d) => d.name).join(', ')));
+          }
           if (willRetryTaskBlocks) {
             taskBlockNudged = true;
             const names = getAllDestinations()
@@ -705,7 +735,20 @@ export async function processQuery(
           // Each result consumes one input; retries carry their original
           // user prompt at their own position in the FIFO queue.
           archivePrompts.shift();
-        } else archivePrompts.shift();
+        } else {
+          if (
+            !retriedThisResult() &&
+            silentNudges < MAX_SILENT_NUDGES &&
+            isChatTurn(routing) &&
+            isSilentTurn(turnToolCalls, midTurnSent > 0 || chatRowWrittenSince(turnStartSeq))
+          ) {
+            silentNudges++;
+            carryTools = true;
+            log('Silent chat turn (empty result, no tool calls); nudging');
+            pushRetry(buildSilentNudge(getAllDestinations().map((d) => d.name).join(', ')));
+          }
+          archivePrompts.shift();
+        }
         // Turn boundary: reset the per-turn sent count after the result's
         // nudge decision has used it. A nudge retry re-counts via its own
         // text events before the retry result, so resetting on every result
@@ -807,6 +850,14 @@ function handleEvent(event: ProviderEvent, _routing: RoutingContext): void {
       log(`Progress: ${event.message}`);
       break;
   }
+}
+
+/**
+ * Lemon fork: a turn someone in a chat is waiting on (not a task run, not an
+ * agent-to-agent message, not a failure-notice wake).
+ */
+function isChatTurn(routing: RoutingContext): boolean {
+  return sendsFailureNotice(routing) && routing.channelType !== 'agent';
 }
 
 /**

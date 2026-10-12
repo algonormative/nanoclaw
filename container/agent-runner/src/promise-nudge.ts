@@ -59,6 +59,40 @@ export function isPromiseOnly(resultText: string, toolCalls: number): boolean {
 }
 
 /**
+ * Tool-call markup written as plain text (`<skill name="plotter">…</skill>`).
+ * The local model sometimes types the call instead of making it; nothing runs.
+ */
+const FAKE_TOOL_RE = /<(skill|invoke|function_calls|parameter|tool_use|tool_call)\b/i;
+
+export function isFakeToolCall(resultText: string, toolCalls: number): boolean {
+  return toolCalls === 0 && FAKE_TOOL_RE.test(resultText);
+}
+
+export const FAKE_TOOL_NUDGE =
+  '<system>That was text, not a tool call: writing <skill …> or similar markup runs nothing and sends nothing. ' +
+  'Call the tool itself (skills load through the Skill tool), do what was asked, then reply in a <message> block.</system>';
+
+/**
+ * A chat turn that ran no tool and delivered nothing: the sender asked for
+ * something and got silence. clean-x2 (2026-10-12): "queue the Sun card" ended
+ * twice on an <internal> plan alone. One nudge per query.
+ */
+export const MAX_SILENT_NUDGES = 1;
+
+export function buildSilentNudge(destinations: string): string {
+  return (
+    '<system>This turn ran no tool and sent nothing, so the person who wrote to you got no answer. ' +
+    'Do what they asked now with your tools, then reply in <message to="name"> ' +
+    `(your destinations: ${destinations}). If you cannot do it, say what is missing.</system>`
+  );
+}
+
+/** True when a chat turn with zero tool calls delivered nothing at all. */
+export function isSilentTurn(toolCalls: number, delivered: boolean): boolean {
+  return toolCalls === 0 && !delivered;
+}
+
+/**
  * Plain text for an unwrapped chat reply that survived the wrap nudge, or ''
  * when it shouldn't be delivered. The local model sometimes keeps answering
  * without <message> tags; in a chat turn the only reader is the sender, so the
@@ -66,7 +100,7 @@ export function isPromiseOnly(resultText: string, toolCalls: number): boolean {
  * never delivered.
  */
 export function plainReplyText(resultText: string): string {
-  if (/<(skill|invoke|function_calls|parameter|tool_use)\b/i.test(resultText)) return '';
+  if (FAKE_TOOL_RE.test(resultText)) return '';
   const text = resultText
     .replace(/<internal>[\s\S]*?<\/internal>/gi, ' ')
     .replace(/<to>[\s\S]*?<\/to>/gi, ' ')

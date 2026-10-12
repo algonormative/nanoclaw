@@ -1,3 +1,4 @@
+import { type PromptBlock, withInlineImages } from '../inline-images.js';
 import { query as sdkQuery, type HookCallback, type PreCompactHookInput } from '@anthropic-ai/claude-agent-sdk';
 
 import { clearContainerToolInFlight, setContainerToolInFlight } from '../db/container-state.js';
@@ -72,7 +73,7 @@ export { SDK_DISALLOWED_TOOLS, TOOL_ALLOWLIST } from './claude-config.js';
 
 interface SDKUserMessage {
   type: 'user';
-  message: { role: 'user'; content: string };
+  message: { role: 'user'; content: string | PromptBlock[] };
   parent_tool_use_id: null;
   session_id: string;
 }
@@ -88,7 +89,8 @@ class MessageStream {
   push(text: string): void {
     this.queue.push({
       type: 'user',
-      message: { role: 'user', content: text },
+      // Lemon fork: referenced photos ride along as image blocks.
+      message: { role: 'user', content: withInlineImages(text) },
       parent_tool_use_id: null,
       session_id: '',
     });
