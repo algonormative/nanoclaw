@@ -17,8 +17,8 @@ describe('isPromiseOnly', () => {
     expect(isPromiseOnly('<message to="nick">Let me know if you want more.</message>', 1)).toBe(false);
   });
 
-  it('flags a bare promise after tool calls (2026-10-12 plotter eval)', () => {
-    expect(isPromiseOnly('<message to="nick">Let me check the plotter status for you.</message>', 1)).toBe(true);
+  it('does not nudge promises after tool calls (evals: it makes the local model spiral)', () => {
+    expect(isPromiseOnly('<message to="nick">Let me check the plotter status for you.</message>', 1)).toBe(false);
   });
 
   it('ignores a real answer after tool calls that ends with an offer', () => {

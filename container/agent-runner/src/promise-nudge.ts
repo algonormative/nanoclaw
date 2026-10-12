@@ -46,24 +46,16 @@ export function isUnbackedClaim(resultText: string, toolCalls: number): boolean 
   return Boolean(text) && text.length <= MAX_PROMISE_TEXT && CLAIM_RE.test(text);
 }
 
-/** After tool calls, a final message this short that only promises still means the turn stopped early. */
-const MAX_PROMISE_AFTER_TOOLS = 160;
-
 /**
- * True when a turn ended on a promise rather than an answer. With zero tool
- * calls any short promising reply counts. After tool calls only a final message
- * that is nothing but a promise counts, e.g. 2026-10-12 eval: the plotter skill
- * loaded, then "Let me check the plotter status for you." and the turn ended.
+ * True when a turn with zero tool calls ended on a promise rather than an answer.
+ * Promises after tool calls are deliberately not nudged: evals on 2026-10-12
+ * (nudges-v2-x2, 5/16 vs 9/16) showed the local model spiralling into repeated
+ * promises and extra messages when nudged mid-task.
  */
 export function isPromiseOnly(resultText: string, toolCalls: number): boolean {
+  if (toolCalls > 0) return false;
   const text = visibleText(resultText);
-  if (!text) return false;
-  if (toolCalls === 0) return text.length <= MAX_PROMISE_TEXT && PROMISE_RE.test(text);
-  // After tool calls the message must OPEN with the promise ("Let me check…"),
-  // not merely end with an offer to do more.
-  if (text.length > MAX_PROMISE_AFTER_TOOLS) return false;
-  const m = PROMISE_RE.exec(text);
-  return Boolean(m) && m!.index <= 3;
+  return Boolean(text) && text.length <= MAX_PROMISE_TEXT && PROMISE_RE.test(text);
 }
 
 /**
