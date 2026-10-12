@@ -97,6 +97,10 @@ export function lemonContribution(ctx: ProviderContainerContext): ProviderContai
       OTEL_LOG_ASSISTANT_RESPONSES: '1',
       CLAUDE_CODE_OTEL_CONTENT_MAX_LENGTH: '8000',
       CLAUDE_CODE_PROPAGATE_TRACEPARENT: '1',
+      // Through the OneCLI proxy the exports vanish silently; bypass it for
+      // lookout only (port-specific, so :8090 keeps its key injection).
+      NO_PROXY: 'host.docker.internal:4318',
+      no_proxy: 'host.docker.internal:4318',
     });
   }
 
