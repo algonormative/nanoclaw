@@ -60,12 +60,14 @@ export function lemonContribution(ctx: ProviderContainerContext): ProviderContai
   // v2 denies credential values in contributed env; OneCLI injects the proxy
   // key for every request to host.docker.internal, so vault scripts get a
   // placeholder they send and the gateway overwrites on the wire.
-  // Lemon's model (`lemon-auto`) is unknown to Claude Code, which then assumes
-  // a 100k context and compacts at ~67k, past the local tier's real window
-  // (Ollama OLLAMA_CONTEXT_LENGTH=65536). Tell it the real window, and cap
-  // output at 8k so the autocompact buffer shrinks from 33k to 21k. Compaction
-  // then fires near 44.5k. Lemon's replies are short. (vault-2gthr, 2026-10-11)
-  env.CLAUDE_CODE_MAX_CONTEXT_TOKENS = '65536';
+  // Lemon's model (`lemon-auto`) is unknown to Claude Code. Two corrections:
+  // (1) cap output at 8k so the autocompact buffer is 21k instead of 33k;
+  // (2) the window is in CLAUDE CODE's token estimate, which runs ~1.5x the
+  // local model's (qwen) count. A fresh session is ~31k qwen tokens but
+  // ~48k by Claude Code's estimate. 65536 compacted every turn and broke
+  // continuity (2026-10-11 evals). 98304 compacts near 77k by Claude Code's
+  // estimate, about 50k real, inside Ollama's 65536. (vault-2gthr)
+  env.CLAUDE_CODE_MAX_CONTEXT_TOKENS = '98304';
   env.CLAUDE_CODE_MAX_OUTPUT_TOKENS = '8000';
 
   env.LITELLM_KEY_VAULT_SCRIPTS = 'gateway-managed';
