@@ -77,7 +77,7 @@ describe('renderMemorySection', () => {
 
       const section = renderMemorySection(BASE);
 
-      expect(section).toContain('Core memory: 300% - 299/100 chars');
+      expect(section).toContain('Core memory: 299% - 299/100 chars');
       expect(section).toContain('consolidate Core Memory below 100 chars');
       expect(section).toContain('fact '.repeat(59));
       expect(section).not.toContain('Recent-days');
