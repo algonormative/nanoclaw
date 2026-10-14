@@ -38,6 +38,7 @@ import {
   categorizeMessage,
   FAILURE_NOTICE_FIELD,
   isClearCommand,
+  isQuietSessionReset,
   isRunnerCommand,
   isSessionEcho,
   stripInternalTags,
@@ -139,8 +140,11 @@ export async function runPollLoop(config: PollLoopConfig): Promise<void> {
   let isFirstPoll = true;
   while (true) {
     if (config.signal?.aborted) return;
-    // Skip system messages — they're responses for MCP tools (e.g., ask_user_question)
-    const messages = surfaceLateAnswers(getPendingMessages(isFirstPoll)).filter((m) => m.kind !== 'system');
+    // Skip system messages — they're responses for MCP tools (e.g., ask_user_question) —
+    // except a scheduled quiet session reset, which the command loop below handles.
+    const messages = surfaceLateAnswers(getPendingMessages(isFirstPoll)).filter(
+      (m) => m.kind !== 'system' || isQuietSessionReset(m),
+    );
     isFirstPoll = false;
     pollCount++;
 
@@ -179,6 +183,13 @@ export async function runPollLoop(config: PollLoopConfig): Promise<void> {
     const commandIds: string[] = [];
 
     for (const msg of messages) {
+      if (isQuietSessionReset(msg)) {
+        log('Session reset (scheduled, quiet)');
+        continuation = undefined;
+        clearContinuation(config.providerName);
+        commandIds.push(msg.id);
+        continue;
+      }
       if ((msg.kind === 'chat' || msg.kind === 'chat-sdk') && isClearCommand(msg)) {
         log('Clearing session (resetting continuation)');
         continuation = undefined;

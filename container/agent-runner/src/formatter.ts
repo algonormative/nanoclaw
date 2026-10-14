@@ -135,6 +135,20 @@ export function isClearCommand(msg: MessageInRow): boolean {
 }
 
 /**
+ * Host-written scheduled session reset (the nightly memory rollover): a
+ * `system` row with content {"type":"session_reset"}. Clears the continuation
+ * like /clear, but sends nothing and never reaches the model.
+ */
+export function isQuietSessionReset(msg: MessageInRow): boolean {
+  if (msg.kind !== 'system') return false;
+  try {
+    return JSON.parse(msg.content)?.type === 'session_reset';
+  } catch {
+    return false;
+  }
+}
+
+/**
  * True for any chat that needs the outer loop's command path: /clear plus
  * admin/passthrough slash commands the SDK can only dispatch when they are
  * a query's first input. Used by the follow-up poller to bail out and let

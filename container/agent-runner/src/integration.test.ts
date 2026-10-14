@@ -546,6 +546,64 @@ describe('poll loop — /clear command', () => {
   });
 });
 
+describe('poll loop — scheduled quiet session reset', () => {
+  it('clears the continuation without a reply or a query', async () => {
+    setContinuation('mock', 'existing-session-id');
+
+    getInboundDb()
+      .prepare(
+        `INSERT INTO messages_in (id, kind, timestamp, status, trigger, platform_id, channel_type, content)
+         VALUES ('m-reset', 'system', datetime('now'), 'pending', 1, 'chan-1', 'discord', ?)`,
+      )
+      .run(JSON.stringify({ type: 'session_reset' }));
+
+    let queried = false;
+    const provider = new MockProvider({}, () => {
+      queried = true;
+      return '<message to="discord-test">should not run</message>';
+    });
+    const controller = new AbortController();
+    const loopPromise = runPollLoopWithTimeout(provider, controller.signal, 2000);
+
+    await waitFor(() => getContinuation('mock') === undefined && getPendingMessages().length === 0, 2000);
+    controller.abort();
+
+    expect(getContinuation('mock')).toBeUndefined();
+    expect(getUndeliveredMessages()).toHaveLength(0);
+    expect(queried).toBe(false);
+
+    await loopPromise.catch(() => {});
+  });
+
+  it('runs a message batched after the reset on a fresh session', async () => {
+    setContinuation('mock', 'existing-session-id');
+    const insert = getInboundDb().prepare(
+      `INSERT INTO messages_in (id, seq, kind, timestamp, status, trigger, platform_id, channel_type, content)
+       VALUES (?, ?, ?, datetime('now'), 'pending', 1, 'chan-1', 'discord', ?)`,
+    );
+    insert.run('m-reset', 2, 'system', JSON.stringify({ type: 'session_reset' }));
+    insert.run('m-hi', 4, 'chat', JSON.stringify({ sender: 'Alice', text: 'good morning' }));
+
+    const resumes: Array<string | undefined> = [];
+    const provider = new MockProvider({}, () => '<message to="discord-test">morning</message>');
+    const origQuery = provider.query.bind(provider);
+    provider.query = (input) => {
+      resumes.push(input.continuation);
+      return origQuery(input);
+    };
+    const controller = new AbortController();
+    const loopPromise = runPollLoopWithTimeout(provider, controller.signal, 2000);
+
+    await waitFor(() => getUndeliveredMessages().length > 0, 2000);
+    controller.abort();
+
+    expect(resumes[0]).toBeUndefined();
+    expect(JSON.parse(getUndeliveredMessages()[0].content).text).toContain('morning');
+
+    await loopPromise.catch(() => {});
+  });
+});
+
 /**
  * Provider that throws on every query, simulating API failures.
  */
