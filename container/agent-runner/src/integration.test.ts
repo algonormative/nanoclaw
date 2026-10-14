@@ -581,7 +581,13 @@ describe('poll loop — scheduled quiet session reset', () => {
       `INSERT INTO messages_in (id, seq, kind, timestamp, status, trigger, platform_id, channel_type, content)
        VALUES (?, ?, ?, datetime('now'), 'pending', 1, 'chan-1', 'discord', ?)`,
     );
-    insert.run('m-reset', 2, 'system', JSON.stringify({ type: 'session_reset' }));
+    // The reset carries no routing; the reply must still route to the chat message.
+    getInboundDb()
+      .prepare(
+        `INSERT INTO messages_in (id, seq, kind, timestamp, status, trigger, content)
+         VALUES ('m-reset', 2, 'system', datetime('now'), 'pending', 1, ?)`,
+      )
+      .run(JSON.stringify({ type: 'session_reset' }));
     insert.run('m-hi', 4, 'chat', JSON.stringify({ sender: 'Alice', text: 'good morning' }));
 
     const resumes: Array<string | undefined> = [];
@@ -598,7 +604,10 @@ describe('poll loop — scheduled quiet session reset', () => {
     controller.abort();
 
     expect(resumes[0]).toBeUndefined();
-    expect(JSON.parse(getUndeliveredMessages()[0].content).text).toContain('morning');
+    const reply = getUndeliveredMessages()[0];
+    expect(JSON.parse(reply.content).text).toContain('morning');
+    expect(reply.platform_id).toBe('chan-1');
+    expect(reply.in_reply_to).toBe('m-hi');
 
     await loopPromise.catch(() => {});
   });

@@ -199,7 +199,8 @@ export interface RoutingContext {
  * answers the requester, not the agent that failed.
  */
 export function extractRouting(messages: MessageInRow[]): RoutingContext {
-  const nonEcho = messages.filter((m) => !isSessionEcho(m));
+  // A scheduled quiet reset is a runner command, never the message being answered.
+  const nonEcho = messages.filter((m) => !isSessionEcho(m) && !isQuietSessionReset(m));
   const waking = nonEcho.filter((m) => m.trigger !== 0);
   const preferred = nonEcho[0] && isFailureNotice(nonEcho[0]) ? waking.find((m) => !isFailureNotice(m)) : undefined;
   const first = preferred ?? nonEcho[0] ?? messages[0];
