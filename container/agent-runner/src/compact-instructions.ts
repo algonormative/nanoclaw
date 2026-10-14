@@ -45,6 +45,17 @@ export function buildPostCompactionReminder(names: string[], taskId: string | nu
   );
 }
 
+const STRUCTURED_SECTIONS = [
+  '   ## Goal - what the user is trying to achieve',
+  '   ## Constraints & preferences - rules and tastes the user stated',
+  '   ## Progress - done / in progress / blocked',
+  '   ## Decisions - choices made, with the reason',
+  '   ## Files & ids touched - seed slugs, task ids, commit hashes, paths',
+  '   ## Open threads & promises - anything owed to the user or awaiting a reply',
+  '   ## Next - the immediate next step',
+  '   ## Critical context - anything else needed to continue correctly',
+];
+
 export function buildCompactInstructions(names: string[], taskId: string | null): string {
   const sentences = buildDeliverySentences(names, taskId);
   const deliveryReminder = sentences.map(
@@ -64,7 +75,16 @@ export function buildCompactInstructions(names: string[], taskId: string | null)
     '2. Preserve the chronological message/reply sequence of recent exchanges.',
     '   The agent needs to see: who said what, in what order, and from which destination.',
     '',
-    '3. At the END of the compaction summary, include this verbatim reminder:',
+    '3. Write the summary with these sections, in order, omitting none:',
+    ...STRUCTURED_SECTIONS,
+    '',
+    '4. Compress old material hard: drop old tool output or reduce it to a one-line conclusion',
+    '   (what was run, what it showed). Keep exact ids, names, slugs, hashes and paths verbatim.',
+    '   If the conversation already starts with a previous compaction summary, UPDATE it:',
+    '   keep its sections, add new progress and decisions, and drop what is resolved;',
+    '   do not restate it from scratch.',
+    '',
+    '5. At the END of the compaction summary, include this verbatim reminder:',
     ...deliveryReminder,
   ].join('\n');
 }

@@ -39,6 +39,38 @@ describe('compaction delivery reminder', () => {
   });
 });
 
+describe('compaction summary template', () => {
+  it('asks for the structured sections, tool-output stubbing and summary updating', () => {
+    for (const taskId of [null, 'daily-digest-a1b2']) {
+      const instructions = buildCompactInstructions(['family'], taskId);
+
+      for (const section of [
+        '## Goal',
+        '## Constraints & preferences',
+        '## Progress',
+        '## Decisions',
+        '## Files & ids touched',
+        '## Open threads & promises',
+        '## Next',
+        '## Critical context',
+      ]) {
+        expect(instructions).toContain(section);
+      }
+      expect(instructions).toContain('drop old tool output');
+      expect(instructions).toContain('exact ids');
+      expect(instructions).toContain('UPDATE it');
+    }
+  });
+
+  it('keeps routing preservation and ends with the delivery reminder', () => {
+    const instructions = buildCompactInstructions(['family'], null);
+
+    expect(instructions).toContain('<message from="..." sender="..." time="...">');
+    expect(instructions.trimEnd().endsWith('Available destinations: `family`."')).toBe(true);
+    expect(instructions.indexOf('## Goal')).toBeLessThan(instructions.indexOf('verbatim reminder'));
+  });
+});
+
 describe('post-compaction reminder', () => {
   it('re-states the canonical delivery sentences with the live destinations', () => {
     const reminder = buildPostCompactionReminder(['family', 'ops'], null);
