@@ -43,9 +43,15 @@ export function memoryGauge(index: string, cap = coreCap()): { text: string; ind
  */
 export function renderMemorySection(baseDir = '/workspace/agent'): string {
   const memoryDir = path.join(baseDir, 'memory');
-  const rawIndex = readMemoryFile(path.join(memoryDir, 'index.md'));
-  const gauge = memoryGauge(rawIndex);
-  const index = readMemoryFile(path.join(memoryDir, 'index.md'), gauge.indexForRender);
+  // Gauge the file as written, then truncate once (rollup cut first, 16k budget last).
+  let rawIndex: string | undefined;
+  try {
+    rawIndex = fs.readFileSync(path.join(memoryDir, 'index.md'), 'utf-8').trim();
+  } catch {
+    rawIndex = undefined;
+  }
+  const gauge = rawIndex === undefined ? undefined : memoryGauge(rawIndex);
+  const index = readMemoryFile(path.join(memoryDir, 'index.md'), gauge?.indexForRender);
   const definition = readMemoryFile(path.join(memoryDir, 'system', 'definition.md'));
 
   return [
@@ -65,7 +71,7 @@ export function renderMemorySection(baseDir = '/workspace/agent'): string {
     '',
     '### memory/index.md',
     '',
-    ...(rawIndex.startsWith('(unavailable') ? [] : [gauge.text, '']),
+    ...(gauge ? [gauge.text, ''] : []),
     index,
     '',
     '### memory/system/definition.md',
