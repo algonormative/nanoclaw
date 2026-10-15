@@ -575,6 +575,34 @@ describe('poll loop — scheduled quiet session reset', () => {
     await loopPromise.catch(() => {});
   });
 
+  it('leaves accumulated context pending instead of querying it', async () => {
+    setContinuation('mock', 'existing-session-id');
+    const insert = getInboundDb().prepare(
+      `INSERT INTO messages_in (id, seq, kind, timestamp, status, trigger, platform_id, channel_type, content)
+       VALUES (?, ?, ?, datetime('now'), 'pending', ?, 'chan-1', 'discord', ?)`,
+    );
+    insert.run('m-ctx', 2, 'chat', 0, JSON.stringify({ sender: 'Lemon Chan', text: 'which first?' }));
+    insert.run('m-reset', 4, 'system', 1, JSON.stringify({ type: 'session_reset' }));
+
+    let queried = false;
+    const provider = new MockProvider({}, () => {
+      queried = true;
+      return '<message to="discord-test">should not run</message>';
+    });
+    const controller = new AbortController();
+    const loopPromise = runPollLoopWithTimeout(provider, controller.signal, 2000);
+
+    await waitFor(() => getContinuation('mock') === undefined, 2000);
+    await sleep(300);
+    controller.abort();
+
+    expect(queried).toBe(false);
+    expect(getUndeliveredMessages()).toHaveLength(0);
+    expect(getPendingMessages().map((m) => m.id)).toEqual(['m-ctx']);
+
+    await loopPromise.catch(() => {});
+  });
+
   it('runs a message batched after the reset on a fresh session', async () => {
     setContinuation('mock', 'existing-session-id');
     const insert = getInboundDb().prepare(

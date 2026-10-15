@@ -171,6 +171,18 @@ export async function runPollLoop(config: PollLoopConfig): Promise<void> {
       continue;
     }
 
+    // A scheduled quiet reset is the batch's only trigger: apply it and leave
+    // the accumulated trigger=0 context pending for Nick's next message.
+    // Otherwise that context became a fresh-session query at 04:30 and the
+    // promise nudge pushed the model into messaging Nick (2026-10-15).
+    if (messages.filter((m) => m.trigger === 1).every(isQuietSessionReset)) {
+      log('Session reset (scheduled, quiet)');
+      continuation = undefined;
+      clearContinuation(config.providerName);
+      markCompleted(messages.filter(isQuietSessionReset).map((m) => m.id));
+      continue;
+    }
+
     const ids = messages.map((m) => m.id);
     markProcessing(ids);
 
