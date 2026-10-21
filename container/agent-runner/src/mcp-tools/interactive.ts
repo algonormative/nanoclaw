@@ -231,6 +231,7 @@ export const askUserQuestion: McpToolDefinition = {
     // Lemon fork: a marker lets the poll loop surface a tap that comes after we stop waiting.
     markWaiting(questionId, {
       title,
+      question,
       options: options.map((o) => ({ label: o.label, value: o.value })),
     });
 

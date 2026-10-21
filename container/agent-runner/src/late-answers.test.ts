@@ -52,7 +52,15 @@ describe('surfaceLateAnswers', () => {
     expect(JSON.parse(out.content).text).toContain('"Standard (~24 min)" on your earlier question "Which Sun card?"');
   });
 
-  it('surfaces a response with no marker (container restarted)', () => {
+  it('includes the question text when the marker has it', () => {
+    const dir = tmp();
+    markWaiting('q2', { ...marker, question: 'Standard or small?' }, dir);
+    markDone('q2', true, dir);
+    const text = JSON.parse(surfaceLateAnswers([row('q2', 'sun-std')], dir)[0].content).text;
+    expect(text).toContain('"Which Sun card?" ("Standard or small?")');
+  });
+
+  it('surfaces a response with no marker (marker lost)', () => {
     const out = surfaceLateAnswers([row('gone', 'sun-std')], tmp())[0];
     expect(out.kind).toBe('chat');
     expect(JSON.parse(out.content).text).toContain('"sun-std"');

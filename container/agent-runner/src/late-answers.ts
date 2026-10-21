@@ -12,10 +12,15 @@ import path from 'path';
 
 import type { MessageInRow } from './db/messages-in.js';
 
-export const QUESTION_DIR = '/tmp/nanoclaw-questions';
+// The session dir, not /tmp: markers must survive the container restarts and
+// nightly resets between a question and a late tap. A tap on 10-16 arrived
+// after a restart had wiped /tmp, came through with no title, and Lemon
+// answered a different question.
+export const QUESTION_DIR = '/workspace/questions';
 
 interface QuestionMarker {
   title: string;
+  question?: string;
   options: { label: string; value: string }[];
   expired?: boolean;
 }
@@ -73,8 +78,9 @@ export function surfaceLateAnswers(rows: MessageInRow[], dir = QUESTION_DIR): Me
     if (marker && !marker.expired) return row;
     const value = parsed.selectedOption ?? '';
     const label = marker?.options.find((o) => o.value === value)?.label ?? value;
+    const asked = marker?.question ? ` ("${marker.question}")` : '';
     const text = marker
-      ? `[Tapped "${label}" on your earlier question "${marker.title}" (after you stopped waiting). Act on it now.]`
+      ? `[Tapped "${label}" on your earlier question "${marker.title}"${asked} (after you stopped waiting). Act on it now.]`
       : `[Tapped "${label}" on one of your earlier questions (after you stopped waiting). Act on it now.]`;
     try {
       fs.rmSync(markerPath(parsed.questionId, dir), { force: true });
